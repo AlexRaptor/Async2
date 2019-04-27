@@ -11,6 +11,8 @@ import UIKit
 class TableViewController: UITableViewController {
     
     private var imageCache = [String: UIImage?]()
+//    private var workItems = [Int: DispatchWorkItem]()
+    private let imageDownloaderQueue = DispatchQueue(label: "MyQueue", qos: .userInitiated, attributes: .concurrent)
     
     private let imageURLStrings = [
         "https://images.pexels.com/photos/207962/pexels-photo-207962.jpeg?cs=srgb&dl=artistic-blossom-bright-207962.jpg&fm=jpg",
@@ -85,6 +87,7 @@ class TableViewController: UITableViewController {
     }
     
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        
         guard let cell = cell as? TableCell else {
             fatalError("Can't cast cell to TableCell.")
         }
@@ -92,24 +95,31 @@ class TableViewController: UITableViewController {
         if let image = imageCache[imageURLStrings[indexPath.row]] {
             cell.configure(image: image)
         } else {
-            cell.startWaitAnimating()
+            loadImageIntoCell(tableView: tableView, cell: cell, forRowAt: indexPath)
+        }
+    }
+    
+    private func loadImageIntoCell(tableView: UITableView, cell: TableCell, forRowAt indexPath: IndexPath) {
+        
+        let workItem = DispatchWorkItem { [weak self, indexPath = indexPath] in
             
-            DispatchQueue.global().async { [weak self, index = indexPath] in
+            guard let this = self else {
+                return
+            }
+            
+            this.loadImage(urlString: this.imageURLStrings[indexPath.row]) { (image) in
                 
-                guard let this = self else {
-                    return
-                }
-                
-                this.loadImage(urlString: this.imageURLStrings[indexPath.row]) { (image) in
-                    
-                    DispatchQueue.main.async {
-                        if tableView.indexPathsForVisibleRows?.contains(index) ?? false {
-                            tableView.reloadRows(at: [index], with: .automatic)
-                        }
+                DispatchQueue.main.async {
+                    if tableView.indexPathsForVisibleRows?.contains(indexPath) ?? false {
+                        tableView.reloadRows(at: [indexPath], with: .automatic)
                     }
                 }
             }
         }
+        
+        cell.startImageLoading(with: workItem)
+        
+        imageDownloaderQueue.asyncAfter(deadline: .now() + 0.5, execute: workItem)
     }
     
     private func loadImage(urlString: String, completion: (UIImage) -> Void) {
@@ -136,7 +146,13 @@ class TableCell: UITableViewCell {
 //    private var imageUrlString = ""
 //    private var thread: Thread?
     
-    func startWaitAnimating() {
+    private var workItem: DispatchWorkItem?
+    
+    func startImageLoading(with workItem: DispatchWorkItem) {
+        
+        self.workItem?.cancel()
+        self.workItem = workItem
+        
         photoView.image = nil
         activityIndicator.isHidden = false
         activityIndicator.startAnimating()
