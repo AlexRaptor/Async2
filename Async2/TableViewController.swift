@@ -89,7 +89,7 @@ class TableViewController: UITableViewController {
             fatalError("Can't cast cell to TableCell.")
         }
         
-        cell.configure(imageUrlString: imageURLStrings[indexPath.row])
+        cell.configureWithThreads(imageUrlString: imageURLStrings[indexPath.row])
     }
 }
 
@@ -100,6 +100,7 @@ class TableCell: UITableViewCell {
     @IBOutlet private var activityIndicator: UIActivityIndicatorView!
     
     private var imageUrlString = ""
+    private var thread: Thread?
     
     func configure(imageUrlString: String) {
         
@@ -138,6 +139,52 @@ class TableCell: UITableViewCell {
                     print("Can't load data from \(imageUrlString)")
                 }
             }
+        }
+    }
+    
+    func configureWithThreads(imageUrlString: String) {
+        
+        if imageUrlString != self.imageUrlString {
+            
+            self.imageUrlString = imageUrlString
+            thread?.cancel()
+            
+            photoView.image = nil
+            
+            activityIndicator.isHidden = false
+            activityIndicator.startAnimating()
+            
+            thread = Thread { [weak self] in
+                
+                guard let this = self else {
+                    return
+                }
+                
+                guard let url = URL(string: imageUrlString) else {
+                    
+                    DispatchQueue.main.async {
+                        this.activityIndicator.stopAnimating()
+                    }
+                    
+                    return
+                }
+                
+                do {
+                    let data = try Data(contentsOf: url)
+                    let image = UIImage(data: data)
+                    
+                    if !Thread.current.isCancelled {
+                        DispatchQueue.main.async {
+                            this.activityIndicator.stopAnimating()
+                            this.photoView.image = image
+                        }
+                    }
+                } catch {
+                    print("Can't load data from \(imageUrlString)")
+                }
+            }
+            
+            thread?.start()
         }
     }
 }
