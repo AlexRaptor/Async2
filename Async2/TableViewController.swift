@@ -10,7 +10,7 @@ import UIKit
 
 class TableViewController: UITableViewController {
     
-    private var images = [UIImage?]()
+    private var imageCache = [String: UIImage?]()
     
     private let imageURLStrings = [
         "https://images.pexels.com/photos/207962/pexels-photo-207962.jpeg?cs=srgb&dl=artistic-blossom-bright-207962.jpg&fm=jpg",
@@ -89,102 +89,147 @@ class TableViewController: UITableViewController {
             fatalError("Can't cast cell to TableCell.")
         }
         
-        cell.configureWithThreads(imageUrlString: imageURLStrings[indexPath.row])
+        if let image = imageCache[imageURLStrings[indexPath.row]] {
+            cell.configure(image: image)
+        } else {
+            cell.startWaitAnimating()
+            
+            DispatchQueue.global().async { [weak self, index = indexPath] in
+                
+                guard let this = self else {
+                    return
+                }
+                
+                this.loadImage(urlString: this.imageURLStrings[indexPath.row]) { (image) in
+                    
+                    DispatchQueue.main.async {
+                        if tableView.indexPathsForVisibleRows?.contains(index) ?? false {
+                            tableView.reloadRows(at: [index], with: .automatic)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func loadImage(urlString: String, completion: (UIImage) -> Void) {
+        
+        var image = UIImage()
+        
+        if let url = URL(string: urlString),
+            let data = try? Data(contentsOf: url),
+            let imageFromData = UIImage(data: data) {
+            
+            image = imageFromData
+        }
+        
+        imageCache[urlString] = image
+        completion(image)
     }
 }
-
 
 class TableCell: UITableViewCell {
     
     @IBOutlet private var photoView: UIImageView!
     @IBOutlet private var activityIndicator: UIActivityIndicatorView!
     
-    private var imageUrlString = ""
-    private var thread: Thread?
+//    private var imageUrlString = ""
+//    private var thread: Thread?
     
-    func configure(imageUrlString: String) {
-        
-        if imageUrlString != self.imageUrlString {
-            
-            self.imageUrlString = imageUrlString
-            photoView.image = nil
-            
-            activityIndicator.isHidden = false
-            activityIndicator.startAnimating()
-            
-            DispatchQueue.global().async { [weak self] in
-                
-                guard let this = self else {
-                    return
-                }
-                
-                guard let url = URL(string: imageUrlString) else {
-                    
-                    DispatchQueue.main.async {
-                        this.activityIndicator.stopAnimating()
-                    }
-                    
-                    return
-                }
-                
-                do {
-                    let data = try Data(contentsOf: url)
-                    let image = UIImage(data: data)
-                    
-                    DispatchQueue.main.async {
-                        this.activityIndicator.stopAnimating()
-                        this.photoView.image = image
-                    }
-                } catch {
-                    print("Can't load data from \(imageUrlString)")
-                }
-            }
-        }
+    func startWaitAnimating() {
+        photoView.image = nil
+        activityIndicator.isHidden = false
+        activityIndicator.startAnimating()
     }
     
-    func configureWithThreads(imageUrlString: String) {
-        
-        if imageUrlString != self.imageUrlString {
-            
-            self.imageUrlString = imageUrlString
-            thread?.cancel()
-            
-            photoView.image = nil
-            
-            activityIndicator.isHidden = false
-            activityIndicator.startAnimating()
-            
-            thread = Thread { [weak self] in
-                
-                guard let this = self else {
-                    return
-                }
-                
-                guard let url = URL(string: imageUrlString) else {
-                    
-                    DispatchQueue.main.async {
-                        this.activityIndicator.stopAnimating()
-                    }
-                    
-                    return
-                }
-                
-                do {
-                    let data = try Data(contentsOf: url)
-                    let image = UIImage(data: data)
-                    
-                    if !Thread.current.isCancelled {
-                        DispatchQueue.main.async {
-                            this.activityIndicator.stopAnimating()
-                            this.photoView.image = image
-                        }
-                    }
-                } catch {
-                    print("Can't load data from \(imageUrlString)")
-                }
-            }
-            
-            thread?.start()
-        }
+    func configure(image: UIImage?) {
+        activityIndicator.stopAnimating()
+        photoView.image = image
     }
+    
+//    func configure(imageUrlString: String) {
+//
+//        if imageUrlString != self.imageUrlString {
+//
+//            self.imageUrlString = imageUrlString
+//            photoView.image = nil
+//
+//            activityIndicator.isHidden = false
+//            activityIndicator.startAnimating()
+//
+//            DispatchQueue.global().async { [weak self] in
+//
+//                guard let this = self else {
+//                    return
+//                }
+//
+//                guard let url = URL(string: imageUrlString) else {
+//
+//                    DispatchQueue.main.async {
+//                        this.activityIndicator.stopAnimating()
+//                    }
+//
+//                    return
+//                }
+//
+//                do {
+//                    let data = try Data(contentsOf: url)
+//                    let image = UIImage(data: data)
+//
+//                    DispatchQueue.main.async {
+//                        this.activityIndicator.stopAnimating()
+//                        this.photoView.image = image
+//                    }
+//                } catch {
+//                    print("Can't load data from \(imageUrlString)")
+//                }
+//            }
+//        }
+//    }
+//
+//    func configureWithThreads(imageUrlString: String) {
+//
+//        if imageUrlString != self.imageUrlString {
+//
+//            self.imageUrlString = imageUrlString
+//            thread?.cancel()
+//
+//            photoView.image = nil
+//
+//            activityIndicator.isHidden = false
+//            activityIndicator.startAnimating()
+//
+//            thread = Thread { [weak self] in
+//
+//                guard let this = self else {
+//                    return
+//                }
+//
+//                guard let url = URL(string: imageUrlString) else {
+//
+//                    DispatchQueue.main.async {
+//                        this.activityIndicator.stopAnimating()
+//                    }
+//
+//                    return
+//                }
+//
+//                do {
+//                    let data = try Data(contentsOf: url)
+//                    let image = UIImage(data: data)
+//
+//                    if !Thread.current.isCancelled {
+//                        DispatchQueue.main.async {
+//                            this.activityIndicator.stopAnimating()
+//                            this.photoView.image = image
+//                        }
+//                    }
+//                } catch {
+//                    print("Can't load data from \(imageUrlString)")
+//                }
+//            }
+//
+//            thread?.start()
+//        }
+//    }
 }
