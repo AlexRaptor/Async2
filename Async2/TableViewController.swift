@@ -57,27 +57,27 @@ class TableViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        do {
-            for urlString in imageURLStrings {
-
-                guard let url = URL(string: urlString) else {
-                    continue
-                }
-                
-                let data = try Data(contentsOf: url)
-                let image = UIImage(data: data)
-                
-                images.append(image)
-                
-            }
-        } catch {
-            print(error.localizedDescription)
-        }
+//        do {
+//            for urlString in imageURLStrings {
+//
+//                guard let url = URL(string: urlString) else {
+//                    continue
+//                }
+//
+//                let data = try Data(contentsOf: url)
+//                let image = UIImage(data: data)
+//
+//                images.append(image)
+//
+//            }
+//        } catch {
+//            print(error.localizedDescription)
+//        }
         
     }
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return images.count
+        return imageURLStrings.count
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -89,7 +89,7 @@ class TableViewController: UITableViewController {
             fatalError("Can't cast cell to TableCell.")
         }
         
-        cell.setImage(images[indexPath.row])
+        cell.configure(imageUrlString: imageURLStrings[indexPath.row])
     }
 }
 
@@ -97,8 +97,47 @@ class TableViewController: UITableViewController {
 class TableCell: UITableViewCell {
     
     @IBOutlet private var photoView: UIImageView!
+    @IBOutlet private var activityIndicator: UIActivityIndicatorView!
     
-    func setImage(_ image: UIImage?) {
-        photoView.image = image
+    private var imageUrlString = ""
+    
+    func configure(imageUrlString: String) {
+        
+        if imageUrlString != self.imageUrlString {
+            
+            self.imageUrlString = imageUrlString
+            photoView.image = nil
+            
+            activityIndicator.isHidden = false
+            activityIndicator.startAnimating()
+            
+            DispatchQueue.global().async { [weak self] in
+                
+                guard let this = self else {
+                    return
+                }
+                
+                guard let url = URL(string: imageUrlString) else {
+                    
+                    DispatchQueue.main.async {
+                        this.activityIndicator.stopAnimating()
+                    }
+                    
+                    return
+                }
+                
+                do {
+                    let data = try Data(contentsOf: url)
+                    let image = UIImage(data: data)
+                    
+                    DispatchQueue.main.async {
+                        this.activityIndicator.stopAnimating()
+                        this.photoView.image = image
+                    }
+                } catch {
+                    print("Can't load data from \(imageUrlString)")
+                }
+            }
+        }
     }
 }
