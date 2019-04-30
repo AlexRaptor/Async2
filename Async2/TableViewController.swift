@@ -99,27 +99,86 @@ class TableViewController: UITableViewController {
         }
     }
     
+    
+    
+//    private func loadImageIntoCell(tableView: UITableView, cell: TableCell, forRowAt indexPath: IndexPath) {
+//
+//        let workItem = DispatchWorkItem { [weak self, indexPath = indexPath] in
+//
+//            guard let this = self else {
+//                return
+//            }
+//
+//            this.loadImage(urlString: this.imageURLStrings[indexPath.row]) { (image) in
+//
+//                DispatchQueue.main.async {
+//                    if tableView.indexPathsForVisibleRows?.contains(indexPath) ?? false {
+//                        tableView.reloadRows(at: [indexPath], with: .automatic)
+//                    }
+//                }
+//            }
+//        }
+//
+//        cell.startImageLoading(with: workItem)
+//
+//        imageDownloaderQueue.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+//    }
+//
+//    private func loadImage(urlString: String, completion: (UIImage) -> Void) {
+//
+//        var image = UIImage()
+//
+//        if let url = URL(string: urlString),
+//            let data = try? Data(contentsOf: url),
+//            let imageFromData = UIImage(data: data) {
+//
+//            image = imageFromData
+//        }
+//
+//        imageCache[urlString] = image
+//        completion(image)
+//    }
+    
     private func loadImageIntoCell(tableView: UITableView, cell: TableCell, forRowAt indexPath: IndexPath) {
         
-        let workItem = DispatchWorkItem { [weak self, indexPath = indexPath] in
+        let urlString = imageURLStrings[indexPath.row]
+        
+        guard let url = URL(string: urlString) else {
+            return
+        }
+        
+        let session = URLSession(configuration: URLSessionConfiguration.default)
+        
+        let dataTask = session.dataTask(with: url) { [weak self] (data, response, error) in
             
             guard let this = self else {
                 return
             }
             
-            this.loadImage(urlString: this.imageURLStrings[indexPath.row]) { (image) in
-                
-                DispatchQueue.main.async {
-                    if tableView.indexPathsForVisibleRows?.contains(indexPath) ?? false {
-                        tableView.reloadRows(at: [indexPath], with: .automatic)
-                    }
+            if error != nil {
+                print("Error image downloading from \(urlString): \(error?.localizedDescription)")
+                return
+            }
+            
+            guard let data = data, let imageFromData = UIImage(data: data) else {
+                print("Data from \(urlString)")
+                return
+            }
+            
+            this.imageCache[urlString] = imageFromData
+            
+            DispatchQueue.main.async {
+                if tableView.indexPathsForVisibleRows?.contains(indexPath) ?? false {
+                    tableView.reloadRows(at: [indexPath], with: .automatic)
                 }
             }
         }
         
-        cell.startImageLoading(with: workItem)
+        cell.startImageLoading(with: dataTask)
         
-        imageDownloaderQueue.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+            dataTask.resume()
+        }
     }
     
     private func loadImage(urlString: String, completion: (UIImage) -> Void) {
@@ -146,17 +205,28 @@ class TableCell: UITableViewCell {
 //    private var imageUrlString = ""
 //    private var thread: Thread?
     
-    private var workItem: DispatchWorkItem?
+//    private var workItem: DispatchWorkItem?
+    private var dataTask: URLSessionDataTask?
     
-    func startImageLoading(with workItem: DispatchWorkItem) {
+    func startImageLoading(with dataTask: URLSessionDataTask) {
         
-        self.workItem?.cancel()
-        self.workItem = workItem
+        self.dataTask?.cancel()
+        self.dataTask = dataTask
         
         photoView.image = nil
         activityIndicator.isHidden = false
         activityIndicator.startAnimating()
     }
+    
+//    func startImageLoading(with workItem: DispatchWorkItem) {
+//
+//        self.workItem?.cancel()
+//        self.workItem = workItem
+//
+//        photoView.image = nil
+//        activityIndicator.isHidden = false
+//        activityIndicator.startAnimating()
+//    }
     
     func configure(image: UIImage?) {
         activityIndicator.stopAnimating()
