@@ -11,6 +11,9 @@ import UIKit
 class TableViewController: UITableViewController {
     
     private var imageCache = [String: UIImage?]()
+    private var imagePartCache = [String: Data]()
+//    private var dataTasks: [URLSessionDataTask?] = []
+    
 //    private var workItems = [Int: DispatchWorkItem]()
     private let imageDownloaderQueue = DispatchQueue(label: "MyQueue", qos: .userInitiated, attributes: .concurrent)
     
@@ -76,6 +79,7 @@ class TableViewController: UITableViewController {
 //            print(error.localizedDescription)
 //        }
         
+//        dataTasks = Array(repeating: nil, count: imageURLStrings.count)
     }
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -149,23 +153,31 @@ class TableViewController: UITableViewController {
         
         let session = URLSession(configuration: URLSessionConfiguration.default)
         
-        let dataTask = session.dataTask(with: url) { [weak self] (data, response, error) in
+        let completionHandler: (URL?, URLResponse?, Error?) -> Void = { [weak self] (url, response, error) in
+            
+            print("1: \(urlString)")
             
             guard let this = self else {
                 return
             }
             
             if error != nil {
-                print("Error image downloading from \(urlString): \(error?.localizedDescription)")
+                print("Error image downloading from \(urlString): \(String(describing: error?.localizedDescription))")
                 return
             }
             
-            guard let data = data, let imageFromData = UIImage(data: data) else {
-                print("Data from \(urlString)")
-                return
+            guard let url = url,
+                let data = try? Data(contentsOf: url),
+                let imageFromData = UIImage(data: data) else {
+                
+                    print("Data from \(urlString)")
+                    return
             }
+            
+            print("2: \(urlString)")
             
             this.imageCache[urlString] = imageFromData
+            this.imagePartCache[urlString] = nil
             
             DispatchQueue.main.async {
                 if tableView.indexPathsForVisibleRows?.contains(indexPath) ?? false {
@@ -174,27 +186,37 @@ class TableViewController: UITableViewController {
             }
         }
         
-        cell.startImageLoading(with: dataTask)
+        var downloadTask = URLSessionDownloadTask()
+        
+        if let resumeData = imagePartCache[urlString] {
+            downloadTask = session.downloadTask(withResumeData: resumeData, completionHandler: completionHandler)
+        } else {
+            downloadTask = session.downloadTask(with: url, completionHandler: completionHandler)
+        }
+        
+        cell.startImageLoading(with: downloadTask) { [weak self] (data) in
+            self?.imagePartCache[urlString] = data
+        }
         
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-            dataTask.resume()
+            downloadTask.resume()
         }
     }
     
-    private func loadImage(urlString: String, completion: (UIImage) -> Void) {
-        
-        var image = UIImage()
-        
-        if let url = URL(string: urlString),
-            let data = try? Data(contentsOf: url),
-            let imageFromData = UIImage(data: data) {
-            
-            image = imageFromData
-        }
-        
-        imageCache[urlString] = image
-        completion(image)
-    }
+//    private func loadImage(urlString: String, completion: (UIImage) -> Void) {
+//
+//        var image = UIImage()
+//
+//        if let url = URL(string: urlString),
+//            let data = try? Data(contentsOf: url),
+//            let imageFromData = UIImage(data: data) {
+//
+//            image = imageFromData
+//        }
+//
+//        imageCache[urlString] = image
+//        completion(image)
+//    }
 }
 
 class TableCell: UITableViewCell {
@@ -206,17 +228,32 @@ class TableCell: UITableViewCell {
 //    private var thread: Thread?
     
 //    private var workItem: DispatchWorkItem?
-    private var dataTask: URLSessionDataTask?
+//    private var dataTask: URLSessionDataTask?
+    private var downloadTask: URLSessionDownloadTask?
     
-    func startImageLoading(with dataTask: URLSessionDataTask) {
+    func startImageLoading(with downloadTask: URLSessionDownloadTask, dataHandler: ((Data?) -> Void)?) {
+
+        self.downloadTask?.cancel { (data) in
+            print("Cancel")
+            dataHandler?(data)
+        }
         
-        self.dataTask?.cancel()
-        self.dataTask = dataTask
+        self.downloadTask = downloadTask
         
         photoView.image = nil
         activityIndicator.isHidden = false
         activityIndicator.startAnimating()
     }
+
+//    func startImageLoading(with dataTask: URLSessionDataTask) {
+//
+//        self.dataTask?.cancel()
+//        self.dataTask = dataTask
+//
+//        photoView.image = nil
+//        activityIndicator.isHidden = false
+//        activityIndicator.startAnimating()
+//    }
     
 //    func startImageLoading(with workItem: DispatchWorkItem) {
 //
