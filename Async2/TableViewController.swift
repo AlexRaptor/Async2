@@ -10,12 +10,9 @@ import UIKit
 
 class TableViewController: UITableViewController {
     
-    private var imageCache = [String: UIImage?]()
-    private var imagePartCache = [String: Data]()
-//    private var dataTasks: [URLSessionDataTask?] = []
-    
-//    private var workItems = [Int: DispatchWorkItem]()
-    private let imageDownloaderQueue = DispatchQueue(label: "MyQueue", qos: .userInitiated, attributes: .concurrent)
+    private var imageCache = [Int: UIImage?]()
+    private var imagePartCache = [Int: Data]()
+    private var downloadTaskPerIndex = [Int: URLSessionDownloadTask]()
     
     private let imageURLStrings = [
         "https://images.pexels.com/photos/207962/pexels-photo-207962.jpeg?cs=srgb&dl=artistic-blossom-bright-207962.jpg&fm=jpg",
@@ -61,25 +58,6 @@ class TableViewController: UITableViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-//        do {
-//            for urlString in imageURLStrings {
-//
-//                guard let url = URL(string: urlString) else {
-//                    continue
-//                }
-//
-//                let data = try Data(contentsOf: url)
-//                let image = UIImage(data: data)
-//
-//                images.append(image)
-//
-//            }
-//        } catch {
-//            print(error.localizedDescription)
-//        }
-        
-//        dataTasks = Array(repeating: nil, count: imageURLStrings.count)
     }
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -96,56 +74,21 @@ class TableViewController: UITableViewController {
             fatalError("Can't cast cell to TableCell.")
         }
         
-        if let image = imageCache[imageURLStrings[indexPath.row]] {
-            cell.configure(image: image)
+        let index = indexPath.row
+        
+        if let image = imageCache[index] {
+            cell.configure(image: image, index: index)
         } else {
             loadImageIntoCell(tableView: tableView, cell: cell, forRowAt: indexPath)
         }
     }
     
-    
-    
-//    private func loadImageIntoCell(tableView: UITableView, cell: TableCell, forRowAt indexPath: IndexPath) {
-//
-//        let workItem = DispatchWorkItem { [weak self, indexPath = indexPath] in
-//
-//            guard let this = self else {
-//                return
-//            }
-//
-//            this.loadImage(urlString: this.imageURLStrings[indexPath.row]) { (image) in
-//
-//                DispatchQueue.main.async {
-//                    if tableView.indexPathsForVisibleRows?.contains(indexPath) ?? false {
-//                        tableView.reloadRows(at: [indexPath], with: .automatic)
-//                    }
-//                }
-//            }
-//        }
-//
-//        cell.startImageLoading(with: workItem)
-//
-//        imageDownloaderQueue.asyncAfter(deadline: .now() + 0.5, execute: workItem)
-//    }
-//
-//    private func loadImage(urlString: String, completion: (UIImage) -> Void) {
-//
-//        var image = UIImage()
-//
-//        if let url = URL(string: urlString),
-//            let data = try? Data(contentsOf: url),
-//            let imageFromData = UIImage(data: data) {
-//
-//            image = imageFromData
-//        }
-//
-//        imageCache[urlString] = image
-//        completion(image)
-//    }
-    
     private func loadImageIntoCell(tableView: UITableView, cell: TableCell, forRowAt indexPath: IndexPath) {
         
-        let urlString = imageURLStrings[indexPath.row]
+        let index = indexPath.row
+//        print(">>> index: \(index)")
+        
+        let urlString = imageURLStrings[index]
         
         guard let url = URL(string: urlString) else {
             return
@@ -153,16 +96,24 @@ class TableViewController: UITableViewController {
         
         let session = URLSession(configuration: URLSessionConfiguration.default)
         
-        let completionHandler: (URL?, URLResponse?, Error?) -> Void = { [weak self] (url, response, error) in
+        let completionHandler: (URL?, URLResponse?, Error?) -> Void = { [weak self, index = index] (url, response, error) in
             
-            print("1: \(urlString)")
+            print(">>> Подготовка: \(index)")
             
             guard let this = self else {
                 return
             }
             
-            if error != nil {
-                print("Error image downloading from \(urlString): \(String(describing: error?.localizedDescription))")
+            if let error = error as NSError? {
+                print(">>> Error \(index) image downloading from \(urlString): \(String(describing: error.localizedDescription)) with code: \(error.code)")
+                
+                // cancelled
+                if error.code != -999 {
+                    this.downloadTaskPerIndex[index] = nil
+                    this.imageCache[index] = UIImage()
+                    this.imagePartCache[index] = nil
+                }
+                
                 return
             }
             
@@ -170,53 +121,56 @@ class TableViewController: UITableViewController {
                 let data = try? Data(contentsOf: url),
                 let imageFromData = UIImage(data: data) else {
                 
-                    print("Data from \(urlString)")
+                    print(">>> Error Data for \(index)")
                     return
             }
             
-            print("2: \(urlString)")
+            print(">>> Сохранено: \(index)")
             
-            this.imageCache[urlString] = imageFromData
-            this.imagePartCache[urlString] = nil
+            this.downloadTaskPerIndex[index] = nil
+            this.imageCache[index] = imageFromData
+            this.imagePartCache[index] = nil
             
             DispatchQueue.main.async {
-                if tableView.indexPathsForVisibleRows?.contains(indexPath) ?? false {
-                    tableView.reloadRows(at: [indexPath], with: .automatic)
+                if cell.index == index {
+                    cell.configure(image: imageFromData, index: index)
                 }
             }
         }
         
         var downloadTask = URLSessionDownloadTask()
         
-        if let resumeData = imagePartCache[urlString] {
+        print(">>> Поиск докачки: \(index)")
+        if let resumeData = imagePartCache[index] {
+            print(">>> Подготовка докачки: \(index)")
             downloadTask = session.downloadTask(withResumeData: resumeData, completionHandler: completionHandler)
         } else {
+            print(">>> Подготовка закачки: \(index)")
             downloadTask = session.downloadTask(with: url, completionHandler: completionHandler)
         }
         
-        cell.startImageLoading(with: downloadTask) { [weak self] (data) in
-            self?.imagePartCache[urlString] = data
+        let canceledIndex = cell.index
+        print(">>> Поиск Прерывания: \(canceledIndex)")
+        if let previousDownloadTaskForCell = downloadTaskPerIndex[canceledIndex] {
+            
+            print(">>> Прерывание найдено: \(canceledIndex)")
+            
+            previousDownloadTaskForCell.cancel { (resumeData) in
+                print(">>> Прерывание: \(canceledIndex)")
+                self.imagePartCache[canceledIndex] = resumeData
+            }
+        } else {
+            print(">>> Прерывание не найдено: \(canceledIndex)")
         }
+
+        cell.configure(index: index)
         
+        downloadTaskPerIndex[index] = downloadTask
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+            print(">>> Старт: \(index)")
             downloadTask.resume()
         }
     }
-    
-//    private func loadImage(urlString: String, completion: (UIImage) -> Void) {
-//
-//        var image = UIImage()
-//
-//        if let url = URL(string: urlString),
-//            let data = try? Data(contentsOf: url),
-//            let imageFromData = UIImage(data: data) {
-//
-//            image = imageFromData
-//        }
-//
-//        imageCache[urlString] = image
-//        completion(image)
-//    }
 }
 
 class TableCell: UITableViewCell {
@@ -224,135 +178,22 @@ class TableCell: UITableViewCell {
     @IBOutlet private var photoView: UIImageView!
     @IBOutlet private var activityIndicator: UIActivityIndicatorView!
     
-//    private var imageUrlString = ""
-//    private var thread: Thread?
+    private(set) var index: Int = -1
     
-//    private var workItem: DispatchWorkItem?
-//    private var dataTask: URLSessionDataTask?
-    private var downloadTask: URLSessionDownloadTask?
-    
-    func startImageLoading(with downloadTask: URLSessionDownloadTask, dataHandler: ((Data?) -> Void)?) {
-
-        self.downloadTask?.cancel { (data) in
-            print("Cancel")
-            dataHandler?(data)
-        }
+    func configure(index: Int) {
         
-        self.downloadTask = downloadTask
+        self.index = index
         
         photoView.image = nil
         activityIndicator.isHidden = false
         activityIndicator.startAnimating()
     }
 
-//    func startImageLoading(with dataTask: URLSessionDataTask) {
-//
-//        self.dataTask?.cancel()
-//        self.dataTask = dataTask
-//
-//        photoView.image = nil
-//        activityIndicator.isHidden = false
-//        activityIndicator.startAnimating()
-//    }
-    
-//    func startImageLoading(with workItem: DispatchWorkItem) {
-//
-//        self.workItem?.cancel()
-//        self.workItem = workItem
-//
-//        photoView.image = nil
-//        activityIndicator.isHidden = false
-//        activityIndicator.startAnimating()
-//    }
-    
-    func configure(image: UIImage?) {
+    func configure(image: UIImage?, index: Int) {
+        
+        self.index = index
+        
         activityIndicator.stopAnimating()
         photoView.image = image
     }
-    
-//    func configure(imageUrlString: String) {
-//
-//        if imageUrlString != self.imageUrlString {
-//
-//            self.imageUrlString = imageUrlString
-//            photoView.image = nil
-//
-//            activityIndicator.isHidden = false
-//            activityIndicator.startAnimating()
-//
-//            DispatchQueue.global().async { [weak self] in
-//
-//                guard let this = self else {
-//                    return
-//                }
-//
-//                guard let url = URL(string: imageUrlString) else {
-//
-//                    DispatchQueue.main.async {
-//                        this.activityIndicator.stopAnimating()
-//                    }
-//
-//                    return
-//                }
-//
-//                do {
-//                    let data = try Data(contentsOf: url)
-//                    let image = UIImage(data: data)
-//
-//                    DispatchQueue.main.async {
-//                        this.activityIndicator.stopAnimating()
-//                        this.photoView.image = image
-//                    }
-//                } catch {
-//                    print("Can't load data from \(imageUrlString)")
-//                }
-//            }
-//        }
-//    }
-//
-//    func configureWithThreads(imageUrlString: String) {
-//
-//        if imageUrlString != self.imageUrlString {
-//
-//            self.imageUrlString = imageUrlString
-//            thread?.cancel()
-//
-//            photoView.image = nil
-//
-//            activityIndicator.isHidden = false
-//            activityIndicator.startAnimating()
-//
-//            thread = Thread { [weak self] in
-//
-//                guard let this = self else {
-//                    return
-//                }
-//
-//                guard let url = URL(string: imageUrlString) else {
-//
-//                    DispatchQueue.main.async {
-//                        this.activityIndicator.stopAnimating()
-//                    }
-//
-//                    return
-//                }
-//
-//                do {
-//                    let data = try Data(contentsOf: url)
-//                    let image = UIImage(data: data)
-//
-//                    if !Thread.current.isCancelled {
-//                        DispatchQueue.main.async {
-//                            this.activityIndicator.stopAnimating()
-//                            this.photoView.image = image
-//                        }
-//                    }
-//                } catch {
-//                    print("Can't load data from \(imageUrlString)")
-//                }
-//            }
-//
-//            thread?.start()
-//        }
-//    }
 }
